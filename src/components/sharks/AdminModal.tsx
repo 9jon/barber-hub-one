@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Settings, X, Trash2, AlertTriangle, Calendar } from 'lucide-react';
 import { useAgendamentos, Agendamento } from '@/hooks/useAgendamentos';
 
+const SENHA_ADMIN = "1234"; // você pode trocar depois
+
 const MESES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
@@ -16,6 +18,16 @@ export const AdminModal = () => {
   const [confirmarLimpeza, setConfirmarLimpeza] = useState(false);
 
   const { getAgendamentosDia, removerAgendamento, limparTudo } = useAgendamentos();
+
+  const abrirAdminComSenha = () => {
+    const senha = prompt("Digite a senha do admin:");
+
+    if (senha === SENHA_ADMIN) {
+      setAberto(true);
+    } else if (senha !== null) {
+      alert("Senha incorreta");
+    }
+  };
 
   const agendamentosDia = getAgendamentosDia(dataSelecionada);
 
@@ -37,7 +49,7 @@ export const AdminModal = () => {
     <>
       {/* Botão discreto */}
       <button
-        onClick={() => setAberto(true)}
+        onClick={abrirAdminComSenha}
         className="fixed bottom-4 right-4 p-3 bg-secondary border border-border rounded-full text-muted-foreground hover:text-primary hover:border-primary transition-colors shadow-lg z-40"
         aria-label="Painel Admin"
         title="Admin Local"
