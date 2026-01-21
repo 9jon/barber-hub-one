@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, Calendar, Clock, Check, X } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { ChevronLeft, ChevronRight, Calendar, Clock, Check, X, User } from 'lucide-react';
 import { useAgendamentos } from '@/hooks/useAgendamentos';
 
 const DIAS_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -24,12 +24,21 @@ export const Calendario = () => {
   const [mesAtual, setMesAtual] = useState(new Date());
   const [diaSelecionado, setDiaSelecionado] = useState<Date | null>(null);
   const [horarioSelecionado, setHorarioSelecionado] = useState<string | null>(null);
+  const [profissionalSelecionado, setProfissionalSelecionado] = useState<string>('');
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
   const [nome, setNome] = useState('');
   const [telefone, setTelefone] = useState('');
   const [mensagem, setMensagem] = useState<{ tipo: 'sucesso' | 'erro'; texto: string } | null>(null);
+  const [enviando, setEnviando] = useState(false);
 
-  const { adicionarAgendamento, getHorariosOcupados } = useAgendamentos();
+  const { adicionarAgendamento, getHorariosOcupados, profissionais } = useAgendamentos();
+
+  // Selecionar primeiro profissional automaticamente
+  useEffect(() => {
+    if (profissionais.length > 0 && !profissionalSelecionado) {
+      setProfissionalSelecionado(profissionais[0].id);
+    }
+  }, [profissionais, profissionalSelecionado]);
 
   const hoje = useMemo(() => {
     const h = new Date();
@@ -45,12 +54,10 @@ export const Calendario = () => {
     const diasAntes = primeiroDia.getDay();
     const dias: (Date | null)[] = [];
 
-    // Dias vazios antes
     for (let i = 0; i < diasAntes; i++) {
       dias.push(null);
     }
 
-    // Dias do mês
     for (let d = 1; d <= ultimoDia.getDate(); d++) {
       dias.push(new Date(ano, mes, d));
     }
@@ -60,7 +67,7 @@ export const Calendario = () => {
 
   const isDiaUtil = (date: Date): boolean => {
     const diaSemana = date.getDay();
-    return diaSemana >= 1 && diaSemana <= 5; // Seg-Sex
+    return diaSemana >= 1 && diaSemana <= 5;
   };
 
   const isDiaPassado = (date: Date): boolean => {
@@ -100,20 +107,24 @@ export const Calendario = () => {
     setMensagem(null);
   };
 
-  const confirmarAgendamento = (e: React.FormEvent) => {
+  const confirmarAgendamento = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!diaSelecionado || !horarioSelecionado || !nome.trim() || !telefone.trim()) {
+    if (!diaSelecionado || !horarioSelecionado || !nome.trim() || !telefone.trim() || !profissionalSelecionado) {
       setMensagem({ tipo: 'erro', texto: 'Preencha todos os campos.' });
       return;
     }
 
+    setEnviando(true);
     const dataStr = formatarData(diaSelecionado);
-    const sucesso = adicionarAgendamento(dataStr, {
+    const sucesso = await adicionarAgendamento(dataStr, {
       horario: horarioSelecionado,
       nome: nome.trim(),
-      telefone: telefone.trim()
+      telefone: telefone.trim(),
+      profissional_id: profissionalSelecionado
     });
+
+    setEnviando(false);
 
     if (sucesso) {
       setMensagem({ tipo: 'sucesso', texto: 'Agendamento confirmado! Aguardamos você.' });
@@ -126,7 +137,11 @@ export const Calendario = () => {
     }
   };
 
-  const horariosOcupados = diaSelecionado ? getHorariosOcupados(formatarData(diaSelecionado)) : [];
+  const horariosOcupados = diaSelecionado && profissionalSelecionado 
+    ? getHorariosOcupados(formatarData(diaSelecionado), profissionalSelecionado) 
+    : [];
+
+  const profissionalNome = profissionais.find(p => p.id === profissionalSelecionado)?.nome || '';
 
   return (
     <section id="agendar" className="py-20 md:py-32 bg-card">
@@ -149,6 +164,27 @@ export const Calendario = () => {
         <div className="max-w-4xl mx-auto grid md:grid-cols-2 gap-8">
           {/* Calendário */}
           <div className="bg-secondary rounded-2xl p-6 border border-border">
+            {/* Seleção de Profissional */}
+            <div className="mb-6">
+              <label className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                <User className="w-4 h-4" />
+                Profissional
+              </label>
+              <select
+                value={profissionalSelecionado}
+                onChange={(e) => {
+                  setProfissionalSelecionado(e.target.value);
+                  setHorarioSelecionado(null);
+                  setMostrarFormulario(false);
+                }}
+                className="w-full px-4 py-3 bg-background border border-border rounded-lg text-card-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              >
+                {profissionais.map(prof => (
+                  <option key={prof.id} value={prof.id}>{prof.nome}</option>
+                ))}
+              </select>
+            </div>
+
             {/* Navegação do mês */}
             <div className="flex items-center justify-between mb-6">
               <button
@@ -239,9 +275,10 @@ export const Calendario = () => {
               </div>
             ) : (
               <>
-                <h3 className="text-lg font-semibold text-card-foreground mb-4">
+                <h3 className="text-lg font-semibold text-card-foreground mb-2">
                   Horários para {diaSelecionado.getDate()} de {MESES[diaSelecionado.getMonth()]}
                 </h3>
+                <p className="text-sm text-primary mb-4">Profissional: {profissionalNome}</p>
 
                 {/* Grid de horários */}
                 <div className="grid grid-cols-3 gap-2 mb-6">
@@ -302,10 +339,11 @@ export const Calendario = () => {
                     </div>
                     <button
                       type="submit"
-                      className="w-full py-3 bg-primary text-primary-foreground font-semibold rounded-lg hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
+                      disabled={enviando}
+                      className="w-full py-3 bg-primary text-primary-foreground font-semibold rounded-lg hover:bg-primary/90 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                     >
                       <Check className="w-5 h-5" />
-                      Confirmar Agendamento
+                      {enviando ? 'Agendando...' : 'Confirmar Agendamento'}
                     </button>
                   </form>
                 )}
