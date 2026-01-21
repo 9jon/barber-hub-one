@@ -31,7 +31,8 @@ export const AdminModal = () => {
     limparDia,
     limparTudo,
     profissionais,
-    loading
+    loading,
+    carregarAgendamentos
   } = useAgendamentos();
 
   // Verificar sessão ao montar
@@ -54,6 +55,13 @@ export const AdminModal = () => {
     window.addEventListener('hashchange', verificarHash);
     return () => window.removeEventListener('hashchange', verificarHash);
   }, []);
+
+  // Recarregar dados quando o modal abrir
+  useEffect(() => {
+    if (aberto && autenticado) {
+      carregarAgendamentos();
+    }
+  }, [aberto, autenticado]);
 
   // Handler para cliques secretos no footer
   useEffect(() => {
