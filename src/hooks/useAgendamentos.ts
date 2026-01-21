@@ -1,112 +1,172 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { supabase } from '@/integrations/supabase/client';
 
-const STORAGE_KEY = 'sharks_agendamentos';
+export interface Profissional {
+  id: string;
+  nome: string;
+  ativo: boolean;
+}
 
 export interface Agendamento {
+  id: string;
   horario: string;
-  nome: string;
+  nome_cliente: string;
   telefone: string;
+  profissional_id: string;
+  profissional_nome?: string;
 }
 
 export interface AgendamentoCompleto extends Agendamento {
   data: string;
 }
 
-export interface AgendamentosPorData {
-  [data: string]: Agendamento[];
-}
-
 export const useAgendamentos = () => {
-  const [agendamentos, setAgendamentos] = useState<AgendamentosPorData>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
+  const [agendamentos, setAgendamentos] = useState<AgendamentoCompleto[]>([]);
+  const [profissionais, setProfissionais] = useState<Profissional[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const salvarAgendamentos = useCallback((novosAgendamentos: AgendamentosPorData) => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(novosAgendamentos));
-    setAgendamentos(novosAgendamentos);
+  // Carregar profissionais
+  const carregarProfissionais = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('profissionais')
+      .select('*')
+      .eq('ativo', true)
+      .order('nome');
+
+    if (!error && data) {
+      setProfissionais(data);
+    }
+    return data || [];
   }, []);
 
-  const adicionarAgendamento = useCallback((data: string, agendamento: Agendamento): boolean => {
-    const agendamentosData = agendamentos[data] || [];
-    const jaReservado = agendamentosData.some(a => a.horario === agendamento.horario);
-    
-    if (jaReservado) {
+  // Carregar todos os agendamentos
+  const carregarAgendamentos = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('agendamentos')
+      .select(`
+        id,
+        data,
+        horario,
+        nome_cliente,
+        telefone,
+        profissional_id,
+        profissionais (nome)
+      `)
+      .order('data', { ascending: true })
+      .order('horario', { ascending: true });
+
+    if (!error && data) {
+      const formatados = data.map(ag => ({
+        id: ag.id,
+        data: ag.data,
+        horario: ag.horario,
+        nome_cliente: ag.nome_cliente,
+        telefone: ag.telefone,
+        profissional_id: ag.profissional_id,
+        profissional_nome: (ag.profissionais as { nome: string } | null)?.nome || ''
+      }));
+      setAgendamentos(formatados);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    carregarProfissionais();
+    carregarAgendamentos();
+  }, [carregarProfissionais, carregarAgendamentos]);
+
+  const adicionarAgendamento = useCallback(async (
+    data: string,
+    agendamento: { horario: string; nome: string; telefone: string; profissional_id: string }
+  ): Promise<boolean> => {
+    const { error } = await supabase
+      .from('agendamentos')
+      .insert({
+        data,
+        horario: agendamento.horario,
+        nome_cliente: agendamento.nome,
+        telefone: agendamento.telefone,
+        profissional_id: agendamento.profissional_id
+      });
+
+    if (error) {
+      console.error('Erro ao agendar:', error);
       return false;
     }
 
-    const novosAgendamentos = {
-      ...agendamentos,
-      [data]: [...agendamentosData, agendamento]
-    };
-    salvarAgendamentos(novosAgendamentos);
+    await carregarAgendamentos();
     return true;
-  }, [agendamentos, salvarAgendamentos]);
+  }, [carregarAgendamentos]);
 
-  const removerAgendamento = useCallback((data: string, horario: string) => {
-    const agendamentosData = agendamentos[data] || [];
-    const novosAgendamentos = {
-      ...agendamentos,
-      [data]: agendamentosData.filter(a => a.horario !== horario)
-    };
-    salvarAgendamentos(novosAgendamentos);
-  }, [agendamentos, salvarAgendamentos]);
+  const removerAgendamento = useCallback(async (id: string) => {
+    const { error } = await supabase
+      .from('agendamentos')
+      .delete()
+      .eq('id', id);
 
-  const editarAgendamento = useCallback((data: string, horarioOriginal: string, novosDados: Partial<Agendamento>) => {
-    const agendamentosData = agendamentos[data] || [];
-    const novosAgendamentos = {
-      ...agendamentos,
-      [data]: agendamentosData.map(a => 
-        a.horario === horarioOriginal 
-          ? { ...a, ...novosDados }
-          : a
-      )
-    };
-    salvarAgendamentos(novosAgendamentos);
-  }, [agendamentos, salvarAgendamentos]);
+    if (!error) {
+      await carregarAgendamentos();
+    }
+  }, [carregarAgendamentos]);
 
-  const getAgendamentosDia = useCallback((data: string): Agendamento[] => {
-    return agendamentos[data] || [];
-  }, [agendamentos]);
+  const editarAgendamento = useCallback(async (
+    id: string,
+    novosDados: { nome_cliente?: string; telefone?: string }
+  ) => {
+    const { error } = await supabase
+      .from('agendamentos')
+      .update(novosDados)
+      .eq('id', id);
+
+    if (!error) {
+      await carregarAgendamentos();
+    }
+  }, [carregarAgendamentos]);
 
   const getTodosAgendamentos = useCallback((): AgendamentoCompleto[] => {
-    const todos: AgendamentoCompleto[] = [];
-    Object.entries(agendamentos).forEach(([data, lista]) => {
-      lista.forEach(ag => {
-        todos.push({ ...ag, data });
-      });
-    });
-    return todos;
+    return agendamentos;
   }, [agendamentos]);
 
-  const getHorariosOcupados = useCallback((data: string): string[] => {
-    return (agendamentos[data] || []).map(a => a.horario);
+  const getHorariosOcupados = useCallback((data: string, profissionalId: string): string[] => {
+    return agendamentos
+      .filter(ag => ag.data === data && ag.profissional_id === profissionalId)
+      .map(ag => ag.horario);
   }, [agendamentos]);
 
-  const limparDia = useCallback((data: string) => {
-    const novosAgendamentos = { ...agendamentos };
-    delete novosAgendamentos[data];
-    salvarAgendamentos(novosAgendamentos);
-  }, [agendamentos, salvarAgendamentos]);
+  const limparDia = useCallback(async (data: string) => {
+    const { error } = await supabase
+      .from('agendamentos')
+      .delete()
+      .eq('data', data);
 
-  const limparTudo = useCallback(() => {
-    localStorage.removeItem(STORAGE_KEY);
-    setAgendamentos({});
-  }, []);
+    if (!error) {
+      await carregarAgendamentos();
+    }
+  }, [carregarAgendamentos]);
+
+  const limparTudo = useCallback(async () => {
+    const { error } = await supabase
+      .from('agendamentos')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000'); // Deleta tudo
+
+    if (!error) {
+      await carregarAgendamentos();
+    }
+  }, [carregarAgendamentos]);
 
   return {
     agendamentos,
+    profissionais,
+    loading,
     adicionarAgendamento,
     removerAgendamento,
     editarAgendamento,
-    getAgendamentosDia,
     getTodosAgendamentos,
     getHorariosOcupados,
     limparDia,
-    limparTudo
+    limparTudo,
+    carregarAgendamentos
   };
 };
